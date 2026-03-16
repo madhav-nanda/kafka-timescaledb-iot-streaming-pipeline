@@ -1,0 +1,69 @@
+{
+  "type": "record",
+  "name": "TurbineTelemetry",
+  "namespace": "com.windturbine.telemetry",
+  "doc": "Schema for wind turbine IoT telemetry events.",
+  "fields": [
+    {
+      "name": "turbine_id",
+      "type": "string",
+      "doc": "Unique identifier for the wind turbine (e.g. WT-001)."
+    },
+    {
+      "name": "timestamp",
+      "type": "string",
+      "doc": "ISO 8601 UTC timestamp of the telemetry reading.",
+      "logicalType": "iso-datetime"
+    },
+    {
+      "name": "wind_speed",
+      "type": "double",
+      "doc": "Wind speed at hub height in m/s."
+    },
+    {
+      "name": "power_output",
+      "type": "double",
+      "doc": "Electrical power output in kW."
+    },
+    {
+      "name": "generator_temperature",
+      "type": "double",
+      "doc": "Generator winding temperature in Celsius."
+    },
+    {
+      "name": "gearbox_temperature",
+      "type": "double",
+      "doc": "Gearbox oil sump temperature in Celsius."
+    },
+    {
+      "name": "ambient_temperature",
+      "type": "double",
+      "doc": "Ambient air temperature in Celsius."
+    },
+    {
+      "name": "rotor_rpm",
+      "type": "double",
+      "doc": "Rotor rotational speed in RPM."
+    },
+    {
+      "name": "blade_pitch_angle",
+      "type": "double",
+      "doc": "Blade pitch angle in degrees."
+    },
+    {
+      "name": "nacelle_direction",
+      "type": "double",
+      "doc": "Nacelle yaw direction in degrees (0-360)."
+    },
+    {
+      "name": "vibration_level",
+      "type": "double",
+      "doc": "Vibration sensor reading in mm/s RMS."
+    },
+    {
+      "name": "turbine_efficiency",
+      "type": "double",
+      "doc": "Computed turbine efficiency percentage."
+    }
+  ]
+}

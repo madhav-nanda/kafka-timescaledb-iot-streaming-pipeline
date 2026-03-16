@@ -1,0 +1,16 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install only the dependencies needed for the exporter
+RUN pip install --no-cache-dir \
+    prometheus-client==0.21.1 \
+    confluent-kafka==2.13.2 \
+    psycopg2-binary==2.9.11
+
+# Copy only the monitoring module
+COPY monitoring/ monitoring/
+
+EXPOSE 8000
+
+CMD ["python", "-m", "monitoring.exporters.pipeline_metrics"]

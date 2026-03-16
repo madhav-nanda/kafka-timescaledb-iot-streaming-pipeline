@@ -1,0 +1,7 @@
+# Spark job dependencies (installed in Spark container)
+
+pyspark==3.5.0
+pyyaml==6.0.1
+psycopg2-binary==2.9.9
+prometheus-client==0.20.0
+python-json-logger==2.0.7

@@ -1,0 +1,88 @@
+##############################################################################
+# Wind Turbine Streaming Platform - Pipeline Configuration
+##############################################################################
+
+kafka:
+  bootstrap_servers: "${KAFKA_BOOTSTRAP_SERVERS:-localhost:9092}"
+  topic: "wind-turbine-telemetry"
+  consumer_group: "spark-streaming-consumer"
+  schema_registry_url: "${SCHEMA_REGISTRY_URL:-http://localhost:8081}"
+  producer:
+    acks: "all"
+    retries: 5
+    retry_backoff_ms: 500
+    batch_size: 16384
+    linger_ms: 10
+    compression_type: "snappy"
+    max_in_flight_requests: 5
+    enable_idempotence: true
+  consumer:
+    auto_offset_reset: "earliest"
+    enable_auto_commit: false
+    max_poll_records: 500
+    session_timeout_ms: 30000
+
+simulator:
+  num_turbines: 12
+  event_interval_seconds: 1.0
+  turbine_id_prefix: "WT"
+  # Realistic operational ranges for wind turbines
+  wind_speed:
+    min: 0.0
+    max: 30.0
+    cut_in: 3.0
+    rated: 12.0
+    cut_out: 25.0
+  power_output:
+    rated_kw: 3000.0
+  temperature:
+    ambient_min: -10.0
+    ambient_max: 45.0
+    generator_base: 60.0
+    generator_variance: 25.0
+    gearbox_base: 55.0
+    gearbox_variance: 20.0
+
+spark:
+  app_name: "WindTurbineStreamingPipeline"
+  master: "${SPARK_MASTER:-local[*]}"
+  checkpoint_location: "s3a://wind-turbine-checkpoints/streaming"
+  trigger_interval: "30 seconds"
+  watermark_delay: "5 minutes"
+  bronze:
+    output_path: "s3a://wind-turbine-bronze/telemetry"
+    format: "parquet"
+    partition_by: ["event_date", "turbine_id"]
+  silver:
+    output_path: "s3a://wind-turbine-silver/telemetry"
+    format: "parquet"
+    partition_by: ["event_date", "turbine_id"]
+  gold:
+    output_path: "s3a://wind-turbine-gold/analytics"
+    format: "parquet"
+    partition_by: ["event_date"]
+
+minio:
+  endpoint: "${MINIO_ENDPOINT:-http://localhost:9000}"
+  access_key: "${MINIO_ACCESS_KEY:-minioadmin}"
+  secret_key: "${MINIO_SECRET_KEY:-minioadmin123}"
+  buckets:
+    - "wind-turbine-bronze"
+    - "wind-turbine-silver"
+    - "wind-turbine-gold"
+    - "wind-turbine-checkpoints"
+
+timescaledb:
+  host: "${TIMESCALEDB_HOST:-localhost}"
+  port: ${TIMESCALEDB_PORT:-5432}
+  database: "${TIMESCALEDB_DB:-windturbine}"
+  user: "${TIMESCALEDB_USER:-windturbine}"
+  password: "${TIMESCALEDB_PASSWORD:-changeme_in_production}"
+  pool_size: 5
+  max_overflow: 10
+
+monitoring:
+  prometheus:
+    port: 8000
+    metrics_path: "/metrics"
+  log_level: "INFO"

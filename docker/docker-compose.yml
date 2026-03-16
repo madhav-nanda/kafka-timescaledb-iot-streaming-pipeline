@@ -1,0 +1,428 @@
+##############################################################################
+# Wind Turbine Streaming Platform — Docker Compose
+#
+# Services:
+#   kafka          — Kafka broker (KRaft mode, no ZooKeeper)
+#   kafka-init     — One-shot topic creation
+#   schema-registry — Confluent Schema Registry
+#   kafka-ui       — Web UI for Kafka inspection
+#   minio          — S3-compatible object storage (data lake)
+#   minio-init     — One-shot bucket creation
+#   timescaledb    — TimescaleDB (PostgreSQL with time-series extension)
+#   spark-app      — Spark Structured Streaming application (local[*] mode)
+#   simulator      — Wind turbine IoT sensor simulator + Kafka producer
+#   prometheus     — Metrics collection
+#   grafana        — Dashboards
+#   airflow-*      — Airflow scheduler + webserver + init
+##############################################################################
+
+x-airflow-common: &airflow-common
+  image: apache/airflow:2.8.1-python3.11
+  environment:
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres:5432/airflow
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
+    KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    SCHEMA_REGISTRY_URL: http://schema-registry:8081
+    MINIO_ENDPOINT: http://minio:9000
+    MINIO_ACCESS_KEY: minioadmin
+    MINIO_SECRET_KEY: minioadmin123
+    TIMESCALEDB_HOST: timescaledb
+    TIMESCALEDB_PORT: "5432"
+    TIMESCALEDB_DB: windturbine
+    TIMESCALEDB_USER: windturbine
+    TIMESCALEDB_PASSWORD: changeme_in_production
+  volumes:
+    - ../airflow/dags:/opt/airflow/dags
+    - airflow-logs:/opt/airflow/logs
+  depends_on:
+    airflow-postgres:
+      condition: service_healthy
+
+services:
+
+  # ────────────────────── Kafka (KRaft) ──────────────────────
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    hostname: kafka
+    container_name: kafka
+    ports:
+      - "9092:9092"
+      - "9101:9101"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,HOST://localhost:9092
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,CONTROLLER://0.0.0.0:9093,HOST://0.0.0.0:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_JMX_PORT: 9101
+      KAFKA_JMX_HOSTNAME: localhost
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: kafka-broker-api-versions --bootstrap-server localhost:29092 | grep -q ApiVersion
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 30s
+
+  # ────────────────────── Kafka Init (topic creation) ──────────────────────
+
+  kafka-init:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        echo 'Creating Kafka topics...' &&
+        kafka-topics --bootstrap-server kafka:29092 \
+          --create --if-not-exists \
+          --topic wind-turbine-telemetry \
+          --partitions 3 \
+          --replication-factor 1 \
+          --config retention.ms=604800000 \
+          --config cleanup.policy=delete &&
+        echo 'Topic wind-turbine-telemetry created successfully' &&
+        kafka-topics --bootstrap-server kafka:29092 --describe --topic wind-turbine-telemetry
+    restart: "no"
+
+  # ────────────────────── Schema Registry ──────────────────────
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.6.0
+    hostname: schema-registry
+    container_name: schema-registry
+    ports:
+      - "8081:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:29092
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+    depends_on:
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: curl -f http://localhost:8081/ || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  # ────────────────────── Kafka UI ──────────────────────
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: windturbine-cluster
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      KAFKA_CLUSTERS_0_SCHEMAREGISTRY: http://schema-registry:8081
+      KAFKA_CLUSTERS_0_METRICS_PORT: 9101
+    depends_on:
+      kafka:
+        condition: service_healthy
+      schema-registry:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ────────────────────── MinIO (Data Lake) ──────────────────────
+
+  minio:
+    image: minio/minio:latest
+    hostname: minio
+    container_name: minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+      MINIO_PROMETHEUS_AUTH_TYPE: public
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin123 &&
+      mc mb --ignore-existing local/wind-turbine-bronze &&
+      mc mb --ignore-existing local/wind-turbine-silver &&
+      mc mb --ignore-existing local/wind-turbine-gold &&
+      mc mb --ignore-existing local/wind-turbine-checkpoints &&
+      echo 'Buckets created successfully'
+      "
+    restart: "no"
+
+  # ────────────────────── TimescaleDB ──────────────────────
+
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    hostname: timescaledb
+    container_name: timescaledb
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: windturbine
+      POSTGRES_USER: windturbine
+      POSTGRES_PASSWORD: changeme_in_production
+    volumes:
+      - timescaledb-data:/var/lib/postgresql/data
+      - ../database/migrations/001_init_schema.sql:/docker-entrypoint-initdb.d/001_init_schema.sql
+    healthcheck:
+      test: pg_isready -U windturbine -d windturbine
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # ────────────────────── Simulator (Kafka Producer) ──────────────────────
+
+  simulator:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.simulator
+    container_name: simulator
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
+    depends_on:
+      kafka:
+        condition: service_healthy
+      schema-registry:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ────────────────────── Spark Streaming App ──────────────────────
+  # Runs in local[*] mode — driver and executors in the same JVM.
+  # This avoids the worker-missing-code problem and is correct for
+  # single-node Docker deployments.
+
+  spark-app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.spark
+    container_name: spark-app
+    ports:
+      - "4040:4040"
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin123
+      TIMESCALEDB_HOST: timescaledb
+      TIMESCALEDB_PORT: "5432"
+      TIMESCALEDB_DB: windturbine
+      TIMESCALEDB_USER: windturbine
+      TIMESCALEDB_PASSWORD: changeme_in_production
+      SPARK_MASTER: "local[*]"
+    command: >
+      /opt/spark/bin/spark-submit
+        --master local[*]
+        --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,org.apache.spark:spark-avro_2.12:3.5.0,org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262,org.postgresql:postgresql:42.7.1
+        --conf spark.driver.host=spark-app
+        --conf spark.driver.memory=2g
+        --conf spark.executor.memory=2g
+        --conf spark.hadoop.fs.s3a.endpoint=http://minio:9000
+        --conf spark.hadoop.fs.s3a.access.key=minioadmin
+        --conf spark.hadoop.fs.s3a.secret.key=minioadmin123
+        --conf spark.hadoop.fs.s3a.path.style.access=true
+        --conf spark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem
+        --conf spark.hadoop.fs.s3a.connection.ssl.enabled=false
+        --conf spark.sql.streaming.schemaInference=true
+        --conf spark.ui.port=4040
+        /app/spark/streaming_pipeline.py
+    depends_on:
+      kafka:
+        condition: service_healthy
+      schema-registry:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      timescaledb:
+        condition: service_healthy
+    restart: on-failure
+
+  # ────────────────────── Observability Exporters ──────────────────────
+
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:latest
+    container_name: kafka-exporter
+    command:
+      - --kafka.server=kafka:29092
+      - --topic.filter=wind-turbine-telemetry
+      - --group.filter=.*
+    ports:
+      - "9308:9308"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
+
+  timescaledb-exporter:
+    image: quay.io/prometheuscommunity/postgres-exporter:latest
+    container_name: timescaledb-exporter
+    environment:
+      DATA_SOURCE_NAME: "postgresql://windturbine:changeme_in_production@timescaledb:5432/windturbine?sslmode=disable"
+    ports:
+      - "9187:9187"
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    restart: unless-stopped
+
+  pipeline-exporter:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.pipeline-exporter
+    container_name: pipeline-exporter
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_TOPIC: wind-turbine-telemetry
+      KAFKA_CONSUMER_GROUP: spark-streaming-consumer
+      TIMESCALEDB_HOST: timescaledb
+      TIMESCALEDB_PORT: "5432"
+      TIMESCALEDB_DB: windturbine
+      TIMESCALEDB_USER: windturbine
+      TIMESCALEDB_PASSWORD: changeme_in_production
+    ports:
+      - "8000:8000"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ────────────────────── Prometheus ──────────────────────
+
+  prometheus:
+    image: prom/prometheus:v2.49.1
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ../monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=15d"
+    depends_on:
+      - kafka-exporter
+      - timescaledb-exporter
+      - pipeline-exporter
+    restart: unless-stopped
+
+  # ────────────────────── Grafana ──────────────────────
+
+  grafana:
+    image: grafana/grafana:10.3.1
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ../monitoring/grafana/dashboards:/var/lib/grafana/dashboards
+      - ../monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+      - timescaledb
+    restart: unless-stopped
+
+  # ────────────────────── Airflow ──────────────────────
+
+  airflow-postgres:
+    image: postgres:16-alpine
+    container_name: airflow-postgres
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - airflow-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: pg_isready -U airflow
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  airflow-init:
+    <<: *airflow-common
+    container_name: airflow-init
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db migrate &&
+        airflow users create \
+          --username admin \
+          --password admin \
+          --firstname Admin \
+          --lastname User \
+          --role Admin \
+          --email admin@windturbine.local || true
+    restart: "no"
+
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: airflow-scheduler
+    command: scheduler
+    restart: unless-stopped
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: airflow-webserver
+    command: webserver
+    ports:
+      - "8082:8080"
+    restart: unless-stopped
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+volumes:
+  kafka-data:
+  minio-data:
+  timescaledb-data:
+  prometheus-data:
+  grafana-data:
+  airflow-logs:
+  airflow-postgres-data:

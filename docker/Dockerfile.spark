@@ -1,0 +1,20 @@
+FROM apache/spark:3.5.1-python3
+
+USER root
+
+# Ensure Python packages are available to both driver AND executors.
+# Without this, workers can't resolve "from configs import ..." or
+# "from spark.jobs import ..." when executing PySpark tasks.
+ENV PYTHONPATH=/app:${PYTHONPATH}
+
+# Install Python dependencies
+COPY requirements-spark.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
+
+# Copy application code
+COPY configs/ /app/configs/
+COPY schemas/ /app/schemas/
+COPY spark/ /app/spark/
+COPY database/ /app/database/
+
+WORKDIR /app

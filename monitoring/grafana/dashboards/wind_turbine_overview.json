@@ -1,0 +1,469 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 100 },
+              { "color": "green", "value": 1000 }
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "title": "Events Produced (Total)",
+      "description": "Total telemetry events produced to Kafka by the simulator.",
+      "type": "gauge",
+      "targets": [
+        {
+          "expr": "sum(windturbine_events_produced_total)",
+          "legendFormat": "Total Events",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "ops" }
+      },
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
+      "id": 2,
+      "title": "Event Throughput (events/sec)",
+      "description": "Rate of events produced per second, measured over a 1-minute window.",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(windturbine_events_produced_total[1m]))",
+          "legendFormat": "Produced/sec",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "short" }
+      },
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 0 },
+      "id": 3,
+      "title": "Kafka Consumer Lag",
+      "description": "Messages behind for the spark-streaming-consumer group.",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(kafka_consumergroup_lag{group=\"spark-streaming-consumer\"}) by (topic)",
+          "legendFormat": "kafka-exporter: {{ topic }}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(windturbine_kafka_consumer_lag) by (topic)",
+          "legendFormat": "pipeline: {{ topic }}",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "short" }
+      },
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 0 },
+      "id": 4,
+      "title": "Kafka Delivery Failures",
+      "description": "Total Kafka delivery failures reported by the pipeline exporter.",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "windturbine_kafka_delivery_failures_total",
+          "legendFormat": "Delivery Failures",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "background",
+        "graphMode": "none"
+      }
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "short" }
+      },
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 6 },
+      "id": 5,
+      "title": "Pipeline Errors by Component",
+      "description": "Rate of pipeline errors broken down by component.",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(windturbine_pipeline_errors_total[5m])) by (component)",
+          "legendFormat": "{{ component }}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "s" }
+      },
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 6 },
+      "id": 6,
+      "title": "Spark Batch Duration (p95)",
+      "description": "95th percentile micro-batch duration by pipeline layer.",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(windturbine_spark_batch_duration_seconds_bucket[5m])) by (le, layer))",
+          "legendFormat": "p95 {{ layer }}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 12 },
+      "id": 100,
+      "title": "--- Turbine Telemetry (TimescaleDB) ---",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "watt" }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 13 },
+      "id": 20,
+      "title": "Avg Power Output per Turbine (Hourly)",
+      "description": "Hourly average power output from the Gold layer in TimescaleDB.",
+      "type": "timeseries",
+      "targets": [
+        {
+          "rawSql": "SELECT window_start AS time, turbine_id, avg_power_kw FROM hourly_power_generation WHERE $__timeFilter(window_start) ORDER BY window_start",
+          "format": "time_series",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "short" }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 13 },
+      "id": 21,
+      "title": "Total Energy Generated (kWh) per Turbine",
+      "description": "Hourly total energy generated per turbine.",
+      "type": "timeseries",
+      "targets": [
+        {
+          "rawSql": "SELECT window_start AS time, turbine_id, total_energy_kwh FROM hourly_power_generation WHERE $__timeFilter(window_start) ORDER BY window_start",
+          "format": "time_series",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "celsius" }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 21 },
+      "id": 22,
+      "title": "Avg Generator Temperature per Turbine",
+      "description": "Hourly average generator temperature. Red zone above 85C.",
+      "type": "timeseries",
+      "targets": [
+        {
+          "rawSql": "SELECT window_start AS time, turbine_id, avg_generator_temp FROM hourly_power_generation WHERE $__timeFilter(window_start) ORDER BY window_start",
+          "format": "time_series",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "velocityms" }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 21 },
+      "id": 23,
+      "title": "Avg Wind Speed per Turbine",
+      "description": "Hourly average wind speed. Cut-in at 3 m/s, rated at 12 m/s.",
+      "type": "timeseries",
+      "targets": [
+        {
+          "rawSql": "SELECT window_start AS time, turbine_id, avg_wind_speed FROM hourly_power_generation WHERE $__timeFilter(window_start) ORDER BY window_start",
+          "format": "time_series",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 5 },
+              { "color": "red", "value": 20 }
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 29 },
+      "id": 24,
+      "title": "Anomalies by Type (Last 24h)",
+      "description": "Count of anomalies detected in the last 24 hours by type.",
+      "type": "stat",
+      "targets": [
+        {
+          "rawSql": "SELECT anomaly_type, COUNT(*) AS count FROM turbine_anomalies WHERE event_ts > NOW() - INTERVAL '24 hours' GROUP BY anomaly_type ORDER BY count DESC",
+          "format": "table",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": true },
+        "colorMode": "background",
+        "graphMode": "none"
+      }
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "short" }
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 29 },
+      "id": 25,
+      "title": "Anomalies Over Time",
+      "description": "Anomaly count per hour by severity level.",
+      "type": "timeseries",
+      "targets": [
+        {
+          "rawSql": "SELECT time_bucket('1 hour', event_ts) AS time, severity, COUNT(*) AS count FROM turbine_anomalies WHERE $__timeFilter(event_ts) GROUP BY time, severity ORDER BY time",
+          "format": "time_series",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0.3 },
+              { "color": "green", "value": 0.6 }
+            ]
+          },
+          "unit": "percentunit"
+        }
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 29 },
+      "id": 26,
+      "title": "Avg Capacity Factor per Turbine (Latest)",
+      "description": "Latest hourly capacity factor per turbine. Higher = better utilization.",
+      "type": "stat",
+      "targets": [
+        {
+          "rawSql": "SELECT DISTINCT ON (turbine_id) turbine_id, avg_capacity_factor FROM hourly_power_generation ORDER BY turbine_id, window_start DESC",
+          "format": "table",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": true },
+        "colorMode": "background",
+        "graphMode": "none"
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 37 },
+      "id": 101,
+      "title": "--- Infrastructure Metrics ---",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "s" }
+      },
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 38 },
+      "id": 7,
+      "title": "TimescaleDB Write Duration (p95)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(windturbine_db_write_duration_seconds_bucket[5m])) by (le, table))",
+          "legendFormat": "{{ table }}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "s" }
+      },
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 38 },
+      "id": 8,
+      "title": "Streaming Latency (p95)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(windturbine_streaming_latency_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p95 latency",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "short" }
+      },
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 38 },
+      "id": 9,
+      "title": "Anomaly Detection Rate",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(windturbine_anomalies_detected_total[5m])) by (anomaly_type)",
+          "legendFormat": "{{ anomaly_type }}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Bronze" }, "properties": [{ "id": "color", "value": { "fixedColor": "#73BF69", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "Silver" }, "properties": [{ "id": "color", "value": { "fixedColor": "#5794F2", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "Gold" }, "properties": [{ "id": "color", "value": { "fixedColor": "#FADE2A", "mode": "fixed" } }] }
+        ]
+      },
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 44 },
+      "id": 10,
+      "title": "Data Lake Record Counts",
+      "type": "stat",
+      "targets": [
+        { "expr": "windturbine_bronze_records_total", "legendFormat": "Bronze", "refId": "A" },
+        { "expr": "windturbine_silver_records_total", "legendFormat": "Silver", "refId": "B" },
+        { "expr": "windturbine_gold_records_total", "legendFormat": "Gold", "refId": "C" }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "background",
+        "graphMode": "none"
+      }
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "short" }
+      },
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 44 },
+      "id": 11,
+      "title": "Kafka Topic Offsets",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "kafka_topic_partition_current_offset{topic=\"wind-turbine-telemetry\"}",
+          "legendFormat": "partition {{ partition }}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "short" }
+      },
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 44 },
+      "id": 12,
+      "title": "PostgreSQL Active Connections",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "pg_stat_activity_count{datname=\"windturbine\"}",
+          "legendFormat": "{{ state }}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "bytes" }
+      },
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 50 },
+      "id": 13,
+      "title": "MinIO Storage Used",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "minio_cluster_usage_total_bytes",
+          "legendFormat": "Total Used",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "short" }
+      },
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 50 },
+      "id": 14,
+      "title": "MinIO Bucket Object Counts",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "minio_bucket_usage_object_total",
+          "legendFormat": "{{ bucket }}",
+          "refId": "A"
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["wind-turbine", "streaming", "iot", "monitoring"],
+  "templating": { "list": [] },
+  "time": { "from": "now-3h", "to": "now" },
+  "refresh": "30s",
+  "title": "Wind Turbine Streaming Platform",
+  "uid": "windturbine-overview",
+  "version": 2
+}
